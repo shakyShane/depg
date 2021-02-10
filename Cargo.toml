@@ -11,3 +11,4 @@ swc_ecma_parser = "0.45.6"
 swc_ecma_ast = "0.37.3"
 swc_common = { version = "0.10.9", features = ["tty-emitter"] }
 swc = "0.2.7"
+structopt = "0.3.21"

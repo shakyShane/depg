@@ -1,5 +1,7 @@
+use std::env::current_dir;
 use std::path::PathBuf;
 use std::{path::Path, sync::Arc};
+use structopt::StructOpt;
 use swc::{self, config::Options};
 use swc_common::{
     errors::{ColorConfig, Handler},
@@ -9,14 +11,41 @@ use swc_ecma_ast::{ImportSpecifier, ModuleDecl, ModuleItem, Program};
 use swc_ecma_parser::token::Keyword::Default_;
 use swc_ecma_parser::TsConfig;
 
+/// A basic example
+#[derive(StructOpt, Debug)]
+#[structopt(name = "basic")]
+struct Opt {
+    #[structopt(short, long)]
+    cwd: Option<PathBuf>,
+
+    /// Files to process
+    #[structopt(name = "FILE", parse(from_os_str))]
+    files: Vec<PathBuf>,
+}
+
 fn main() {
     // Prints each argument on a separate line
-    for argument in std::env::args().skip(1) {
-        parse(argument)
+    let mut opts: Opt = Opt::from_args();
+    if opts.files.is_empty() {
+        eprintln!("no files provided");
+        std::process::exit(1);
+    }
+    if opts.cwd.is_none() {
+        opts.cwd = Some(current_dir().expect("can see current"))
+    }
+    from_opt(opts);
+}
+
+fn from_opt(opt: Opt) {
+    if let Some(cwd) = &opt.cwd {
+        for argument in &opt.files {
+            parse(cwd, argument)
+        }
     }
 }
 
-fn parse(pb: impl Into<PathBuf>) {
+fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
+    let subject_file = cwd.into().join(pb.into());
     let cm = Arc::<SourceMap>::default();
     let handler = Arc::new(Handler::with_tty_emitter(
         ColorConfig::Auto,
@@ -25,8 +54,7 @@ fn parse(pb: impl Into<PathBuf>) {
         Some(cm.clone()),
     ));
     let c = swc::Compiler::new(cm.clone(), handler.clone());
-
-    let fm = cm.load_file(&pb.into()).expect("failed to load file");
+    let fm = cm.load_file(&subject_file).expect("failed to load file");
 
     let p = c
         .parse_js(
