@@ -1,3 +1,5 @@
+mod resolve;
+
 use std::env::current_dir;
 use std::path::PathBuf;
 use std::{path::Path, sync::Arc};
@@ -45,7 +47,8 @@ fn from_opt(opt: Opt) {
 }
 
 fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
-    let subject_file = cwd.into().join(pb.into());
+    let cwd = cwd.into();
+    let subject_file = cwd.join(pb.into());
     let cm = Arc::<SourceMap>::default();
     let handler = Arc::new(Handler::with_tty_emitter(
         ColorConfig::Auto,
@@ -68,10 +71,10 @@ fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
             false,
         )
         .expect("failed to process file");
-    run(p);
+    run(&cwd, p);
 }
 
-fn run(p: swc_ecma_ast::Program) {
+fn run(cwd: &PathBuf, p: swc_ecma_ast::Program) {
     match p {
         Program::Module(m) => {
             m.body.iter().for_each(|item| match item {
@@ -79,6 +82,7 @@ fn run(p: swc_ecma_ast::Program) {
                     match m {
                         ModuleDecl::Import(imp) => {
                             println!("from '{}'", imp.src.value);
+                            resolve::resolve(cwd, &imp.src.value);
                             for s in &imp.specifiers {
                                 match s {
                                     ImportSpecifier::Named(n) => {
@@ -101,7 +105,7 @@ fn run(p: swc_ecma_ast::Program) {
                     }
                 }
                 _ => {
-                    println!("non-moduledecrl")
+                    println!("--")
                 }
             })
         }
