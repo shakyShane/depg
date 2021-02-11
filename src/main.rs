@@ -86,15 +86,15 @@ fn run(cwd: &PathBuf, p: swc_ecma_ast::Program) {
                             for s in &imp.specifiers {
                                 match s {
                                     ImportSpecifier::Named(n) => {
-                                        println!("   {}", n.local.sym);
+                                        println!(" named:   {}", n.local.sym);
                                     }
                                     ImportSpecifier::Default(def) => {
                                         // println!("def={:?}", def)
-                                        println!("   {}", def.local.sym);
+                                        println!(" def:   {}", def.local.sym);
                                     }
                                     ImportSpecifier::Namespace(ns) => {
                                         // println!("ns={:?}", ns)
-                                        println!("   {}", ns.local.sym);
+                                        println!(" ns:   {}", ns.local.sym);
                                     }
                                 }
                             }
