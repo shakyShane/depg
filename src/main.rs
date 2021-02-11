@@ -2,15 +2,15 @@ mod resolve;
 
 use std::env::current_dir;
 use std::path::PathBuf;
-use std::{path::Path, sync::Arc};
+use std::{sync::Arc};
 use structopt::StructOpt;
-use swc::{self, config::Options};
+use swc::{self};
 use swc_common::{
     errors::{ColorConfig, Handler},
     SourceMap,
 };
-use swc_ecma_ast::{ImportSpecifier, ModuleDecl, ModuleItem, Program};
-use swc_ecma_parser::token::Keyword::Default_;
+use swc_ecma_ast::{ImportSpecifier, ModuleDecl, Program};
+
 use swc_ecma_parser::TsConfig;
 
 /// A basic example
@@ -26,15 +26,16 @@ struct Opt {
 }
 
 fn main() {
-    // Prints each argument on a separate line
+    std::env::set_var("RUST_LOG", "depg=trace");
+    env_logger::init();
     let mut opts: Opt = Opt::from_args();
     if opts.files.is_empty() {
-        eprintln!("no files provided");
         std::process::exit(1);
     }
     if opts.cwd.is_none() {
         opts.cwd = Some(current_dir().expect("can see current"))
     }
+    log::debug!("{:#?}", opts);
     from_opt(opts);
 }
 
@@ -49,6 +50,7 @@ fn from_opt(opt: Opt) {
 fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
     let cwd = cwd.into();
     let subject_file = cwd.join(pb.into());
+    log::debug!("subject_file = {}", subject_file.display());
     let cm = Arc::<SourceMap>::default();
     let handler = Arc::new(Handler::with_tty_emitter(
         ColorConfig::Auto,
@@ -71,30 +73,34 @@ fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
             false,
         )
         .expect("failed to process file");
-    run(&cwd, p);
+    run(&cwd, &subject_file, p);
 }
 
-fn run(cwd: &PathBuf, p: swc_ecma_ast::Program) {
+fn run(_cwd: &PathBuf, subject_file: &PathBuf, p: swc_ecma_ast::Program) {
     match p {
         Program::Module(m) => {
             m.body.iter().for_each(|item| match item {
                 swc_ecma_ast::ModuleItem::ModuleDecl(m) => {
                     match m {
                         ModuleDecl::Import(imp) => {
-                            println!("from '{}'", imp.src.value);
-                            resolve::resolve(cwd, &imp.src.value);
+                            let resolved = resolve::resolve(subject_file, &imp.src.value);
+                            if let Err(e) = resolved {
+                                eprintln!("ERROR: could not resolve {} from {}", &imp.src.value, subject_file.display());
+                                return eprintln!("    OS error: {}", e);
+                            }
+                            log::debug!("++ {:?}", resolved.unwrap());
                             for s in &imp.specifiers {
                                 match s {
-                                    ImportSpecifier::Named(n) => {
-                                        println!(" named:   {}", n.local.sym);
+                                    ImportSpecifier::Named(_n) => {
+                                        // println!(" named:   {}", n.local.sym);
                                     }
-                                    ImportSpecifier::Default(def) => {
+                                    ImportSpecifier::Default(_def) => {
                                         // println!("def={:?}", def)
-                                        println!(" def:   {}", def.local.sym);
+                                        // println!(" def:   {}", def.local.sym);
                                     }
-                                    ImportSpecifier::Namespace(ns) => {
+                                    ImportSpecifier::Namespace(_ns) => {
                                         // println!("ns={:?}", ns)
-                                        println!(" ns:   {}", ns.local.sym);
+                                        // println!(" ns:   {}", ns.local.sym);
                                     }
                                 }
                             }

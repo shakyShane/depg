@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Run fixtures" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --package depg --bin depg -- fixtures/ts/src/index.ts" />
+    <option name="command" value="run --package depg --bin depg -- --cwd fixtures/ts src/index.ts" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="true" />
