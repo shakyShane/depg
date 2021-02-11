@@ -2,7 +2,7 @@ mod resolve;
 
 use std::env::current_dir;
 use std::path::PathBuf;
-use std::{sync::Arc};
+use std::sync::Arc;
 use structopt::StructOpt;
 use swc::{self};
 use swc_common::{
@@ -11,6 +11,7 @@ use swc_common::{
 };
 use swc_ecma_ast::{ImportSpecifier, ModuleDecl, Program};
 
+use std::collections::{BTreeMap, BTreeSet};
 use swc_ecma_parser::TsConfig;
 
 /// A basic example
@@ -30,6 +31,7 @@ fn main() {
     env_logger::init();
     let mut opts: Opt = Opt::from_args();
     if opts.files.is_empty() {
+        eprintln!("no files provided");
         std::process::exit(1);
     }
     if opts.cwd.is_none() {
@@ -85,7 +87,11 @@ fn run(_cwd: &PathBuf, subject_file: &PathBuf, p: swc_ecma_ast::Program) {
                         ModuleDecl::Import(imp) => {
                             let resolved = resolve::resolve(subject_file, &imp.src.value);
                             if let Err(e) = resolved {
-                                eprintln!("ERROR: could not resolve {} from {}", &imp.src.value, subject_file.display());
+                                eprintln!(
+                                    "ERROR: could not resolve {} from {}",
+                                    &imp.src.value,
+                                    subject_file.display()
+                                );
                                 return eprintln!("    OS error: {}", e);
                             }
                             log::debug!("++ {:?}", resolved.unwrap());
@@ -117,4 +123,39 @@ fn run(_cwd: &PathBuf, subject_file: &PathBuf, p: swc_ecma_ast::Program) {
         }
         Program::Script(_) => todo!("script not supported"),
     }
+}
+
+#[derive(Debug, PartialOrd, Clone, Ord, Eq, PartialEq)]
+struct Entry {
+    path: PathBuf,
+}
+
+impl Entry {
+    fn new(str: impl Into<PathBuf>) -> Self {
+        Self { path: str.into() }
+    }
+}
+
+#[test]
+fn test_btree() {
+    let mut t: BTreeMap<Entry, BTreeSet<Entry>> = BTreeMap::new();
+    let entry_1 = Entry::new("1:src/index.tsx");
+    let entry_2 = Entry::new("2:app-src/index.tsx");
+    let entry_3 = Entry::new("3:components/button.tsx");
+    let entry_4 = Entry::new("4:utils/banner.tsx");
+
+    // first
+    let mut set1 = BTreeSet::new();
+    set1.insert(entry_2.clone());
+
+    // second
+    let mut set2 = BTreeSet::new();
+    set2.insert(entry_3.clone());
+    set2.insert(entry_4.clone());
+
+    t.insert(entry_1.clone(), set1);
+    t.insert(entry_2.clone(), set2);
+
+    let next = t.entry(entry_1).or_insert(BTreeSet::new());
+    next.insert(entry_3.clone());
 }
