@@ -1,4 +1,5 @@
 mod resolve;
+mod ts_config;
 
 use std::env::current_dir;
 use std::path::PathBuf;
@@ -78,8 +79,8 @@ fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
     run(&cwd, &subject_file, p);
 }
 
-fn run(_cwd: &PathBuf, subject_file: &PathBuf, p: swc_ecma_ast::Program) {
-    match p {
+fn run(_cwd: &PathBuf, subject_file: &PathBuf, program: swc_ecma_ast::Program) {
+    match program {
         Program::Module(m) => {
             m.body.iter().for_each(|item| match item {
                 swc_ecma_ast::ModuleItem::ModuleDecl(m) => {
@@ -158,4 +159,6 @@ fn test_btree() {
 
     let next = t.entry(entry_1).or_insert(BTreeSet::new());
     next.insert(entry_3.clone());
+
+    dbg!(t);
 }

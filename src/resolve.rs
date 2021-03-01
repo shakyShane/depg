@@ -1,23 +1,146 @@
+use crate::ts_config::TsConfig;
+use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
-use std::path::{PathBuf, Component};
+use std::path::{Component, PathBuf};
 
-
-
-pub fn resolve(subject_file: &PathBuf, target: &str) -> Result<PathBuf, Error> {
+pub fn resolve(subject_file: &PathBuf, target_import: &str) -> Result<PathBuf, Error> {
     let subject_dir = subject_file.parent().expect("always has a parent");
-    let joined = subject_dir.join(target);
+    log::trace!(
+        "subject_dir={}, target={}",
+        subject_dir.display(),
+        target_import
+    );
+    let joined = subject_dir.join(target_import);
+    log::trace!("joined={}", joined.display());
     let joined_real = realpath(&joined);
+    dbg!(&joined_real);
+    log::trace!("joined_real={}", joined_real.display());
     let resolved = joined_real.canonicalize();
     match resolved {
-        Ok(pb) => {
-            expand_path_with_index_or_extension(&pb).ok_or(Error::from(ErrorKind::NotFound))
-        },
+        Ok(pb) => expand_path_with_index_or_extension(&pb).ok_or(Error::from(ErrorKind::NotFound)),
         Err(e) => match e.kind() {
-            ErrorKind::NotFound => {
-                expand_path_with_index_or_extension(&joined_real).ok_or(Error::from(ErrorKind::NotFound))
-            }
-            _ => Err(e)
+            ErrorKind::NotFound => expand_path_with_index_or_extension(&joined_real)
+                .ok_or(Error::from(ErrorKind::NotFound)),
+            _ => Err(e),
+        },
+    }
+}
+
+pub fn apply_alias(config: TsConfig, target: &str) -> PathBuf {
+    let target_pb = PathBuf::from(target);
+    let is_absolute = target_pb.is_absolute();
+
+    if is_absolute {
+        return target_pb;
+    }
+
+    match target_pb.components().nth(0) {
+        Some(Component::CurDir) | Some(Component::ParentDir) => target_pb,
+        Some(Component::Normal(first_name)) => {
+            // try to match with an alias
+            config
+                .compiler_options
+                .and_then(|opts| opts.paths)
+                .and_then(|paths| {
+                    paths
+                        .keys()
+                        .find(|key| {
+                            let pb = PathBuf::from(key);
+                            if let Some((index, before)) = before_star(&pb) {
+                                log::trace!(
+                                    "key={}, before={}, index={}, target={}",
+                                    key,
+                                    before.display(),
+                                    index,
+                                    target_pb.display()
+                                );
+                                let split = target_pb.components().take(index).collect::<PathBuf>();
+                                return split == before;
+                            }
+
+                            false
+                        })
+                        .and_then(|key| {
+                            let hs = paths.get(key);
+                            if let Some(hs) = hs {
+                                return Some(hs.clone());
+                            }
+                            Some(HashSet::new())
+                        })
+                })
+                .and_then(|hs| {
+                    hs.iter().find_map(|item| {
+                        before_star(item).map(|(index, before)| {
+                            before.join(target_pb.components().skip(index - 1).collect::<PathBuf>())
+                        })
+                    })
+                })
+                .unwrap_or(target_pb)
         }
+        _ => target_pb,
+    }
+}
+
+fn before_star(pb: impl Into<PathBuf>) -> Option<(usize, PathBuf)> {
+    let pb = pb.into();
+    pb.components()
+        .position(|c| match c {
+            Component::Normal(str) => str == "*",
+            _ => false,
+        })
+        .map(|index| (index, pb.components().take(index).collect::<PathBuf>()))
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+    use std::env::current_dir;
+
+    #[test]
+    fn test_resolve_alias() -> Result<(), std::io::Error> {
+        let cwd = current_dir()?.join("fixtures/ts");
+        let subject = cwd.join("src").join("index.ts");
+        let target = "app-src/01/02/03/index.ts";
+        let input = r#"
+            {
+              "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                  "~/src/*": ["./src/scripts/*"],
+                  "app-src/*": ["./__other-src/*"],
+                  "ui/components/*": ["./components/*"],
+                  "not-supported": ["./something/*"]
+                }
+              }
+            }
+        "#;
+        let ts_config: TsConfig = serde_json::from_str(input).unwrap();
+        let alias = apply_alias(ts_config, target);
+        assert_eq!(alias, PathBuf::from("./__other-src/01/02/03/index.ts"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_alias_index() -> Result<(), std::io::Error> {
+        let cwd = current_dir()?.join("fixtures/ts");
+        let subject_file = cwd.join("src").join("index.ts");
+        let target = "app-src";
+        let input = r#"
+            {
+              "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                  "app-src/*": ["./app-src/*"]
+                }
+              }
+            }
+        "#;
+        let ts_config: TsConfig = serde_json::from_str(input).unwrap();
+        let alias_result = apply_alias(ts_config, target);
+        assert_eq!(alias_result, PathBuf::from("./app-src/"));
+        // let with_index = resolve(subject_file, "alias_result")?;
+        // dbg!(with_index);
+        Ok(())
     }
 }
 
@@ -66,7 +189,6 @@ fn expand_path_with_index_or_extension(pb: &PathBuf) -> Option<PathBuf> {
 
     None
 }
-
 
 #[cfg(test)]
 mod tests {

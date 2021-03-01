@@ -3,8 +3,8 @@
     "jsx": "react",
     "baseUrl": ".",
     "paths": {
-      "~/src/*": "./src/*",
-      "app-src/*": "./app-src/*"
+      "~/src/*": ["./src/*"],
+      "app-src/*": ["./app-src/*"]
     }
   }
 }
