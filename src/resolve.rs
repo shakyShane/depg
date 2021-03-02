@@ -1,14 +1,23 @@
-use crate::ts_config::TsConfig;
-use std::collections::HashSet;
+use crate::ts_config::UserTsConfig;
+
 use std::io::{Error, ErrorKind};
 use std::path::{Component, PathBuf};
 
-pub fn resolve(subject_file: &PathBuf, target_import: &str) -> Result<PathBuf, Error> {
-    let subject_dir = subject_file.parent().expect("always has a parent");
+pub fn resolve(
+    subject_file: impl Into<PathBuf>,
+    target_import: impl Into<PathBuf>,
+) -> Result<PathBuf, Error> {
+    let target_import = target_import.into();
+    let subject_file = subject_file.into();
+    let subject_dir: PathBuf = if subject_file.extension().is_some() {
+        subject_file.parent().expect("always has a parent").into()
+    } else {
+        subject_file
+    };
     log::trace!(
         "subject_dir={}, target={}",
         subject_dir.display(),
-        target_import
+        target_import.display()
     );
     let joined = subject_dir.join(target_import);
     log::trace!("joined={}", joined.display());
@@ -26,58 +35,40 @@ pub fn resolve(subject_file: &PathBuf, target_import: &str) -> Result<PathBuf, E
     }
 }
 
-pub fn apply_alias(config: TsConfig, target: &str) -> PathBuf {
-    let target_pb = PathBuf::from(target);
+pub fn apply_alias(config: &UserTsConfig, target_pb: &PathBuf) -> Option<PathBuf> {
     let is_absolute = target_pb.is_absolute();
 
     if is_absolute {
-        return target_pb;
+        return Some(target_pb.clone());
     }
 
-    match target_pb.components().nth(0) {
-        Some(Component::CurDir) | Some(Component::ParentDir) => target_pb,
-        Some(Component::Normal(first_name)) => {
-            // try to match with an alias
-            config
-                .compiler_options
-                .and_then(|opts| opts.paths)
-                .and_then(|paths| {
-                    paths
-                        .keys()
-                        .find(|key| {
-                            let pb = PathBuf::from(key);
-                            if let Some((index, before)) = before_star(&pb) {
-                                log::trace!(
-                                    "key={}, before={}, index={}, target={}",
-                                    key,
-                                    before.display(),
-                                    index,
-                                    target_pb.display()
-                                );
-                                let split = target_pb.components().take(index).collect::<PathBuf>();
-                                return split == before;
-                            }
-
-                            false
-                        })
-                        .and_then(|key| {
-                            let hs = paths.get(key);
-                            if let Some(hs) = hs {
-                                return Some(hs.clone());
-                            }
-                            Some(HashSet::new())
-                        })
-                })
-                .and_then(|hs| {
-                    hs.iter().find_map(|item| {
-                        before_star(item).map(|(index, before)| {
-                            before.join(target_pb.components().skip(index - 1).collect::<PathBuf>())
-                        })
-                    })
-                })
-                .unwrap_or(target_pb)
-        }
-        _ => target_pb,
+    let first = target_pb.components().nth(0)?;
+    let paths = config.compiler_options.as_ref()?.paths.as_ref()?;
+    if let Component::Normal(_) = first {
+        paths.keys().find_map(|key| {
+            let pb = PathBuf::from(key);
+            let (index, before) = before_star(&pb)?;
+            log::trace!(
+                "key={}, before={}, index={}, target={}",
+                key,
+                before.display(),
+                index,
+                target_pb.display()
+            );
+            let split_target = target_pb.components().take(index).collect::<PathBuf>();
+            if split_target != before {
+                return None;
+            }
+            let hs = paths.get(key)?;
+            hs.iter().find_map(|item| {
+                let (index, before) = before_star(item)?;
+                let target_with_alias_prefix =
+                    target_pb.components().skip(index - 1).collect::<PathBuf>();
+                Some(before.join(target_with_alias_prefix))
+            })
+        })
+    } else {
+        Some(target_pb.clone())
     }
 }
 
@@ -91,6 +82,21 @@ fn before_star(pb: impl Into<PathBuf>) -> Option<(usize, PathBuf)> {
         .map(|index| (index, pb.components().take(index).collect::<PathBuf>()))
 }
 
+pub fn resolve_target(
+    cwd: &PathBuf,
+    subject_file: &PathBuf,
+    target_import: &PathBuf,
+    ts_config: &UserTsConfig,
+) -> Result<PathBuf, std::io::Error> {
+    let alias_result = apply_alias(ts_config, &target_import);
+    if let Some(alias) = alias_result {
+        // do aliases always resolve from the cwd?
+        resolve(&cwd, alias)
+    } else {
+        resolve(&subject_file, &target_import)
+    }
+}
+
 #[cfg(test)]
 mod resolve_tests {
     use super::*;
@@ -99,8 +105,8 @@ mod resolve_tests {
     #[test]
     fn test_resolve_alias() -> Result<(), std::io::Error> {
         let cwd = current_dir()?.join("fixtures/ts");
-        let subject = cwd.join("src").join("index.ts");
-        let target = "app-src/01/02/03/index.ts";
+        let _subject = cwd.join("src").join("index.ts");
+        let target = PathBuf::from("app-src/01/02/03/index.ts");
         let input = r#"
             {
               "compilerOptions": {
@@ -114,17 +120,17 @@ mod resolve_tests {
               }
             }
         "#;
-        let ts_config: TsConfig = serde_json::from_str(input).unwrap();
-        let alias = apply_alias(ts_config, target);
-        assert_eq!(alias, PathBuf::from("./__other-src/01/02/03/index.ts"));
+        let ts_config: UserTsConfig = serde_json::from_str(input).unwrap();
+        let alias = apply_alias(&ts_config, &target);
+        assert_eq!(
+            alias,
+            Some(PathBuf::from("./__other-src/01/02/03/index.ts"))
+        );
         Ok(())
     }
 
     #[test]
     fn test_resolve_alias_index() -> Result<(), std::io::Error> {
-        let cwd = current_dir()?.join("fixtures/ts");
-        let subject_file = cwd.join("src").join("index.ts");
-        let target = "app-src";
         let input = r#"
             {
               "compilerOptions": {
@@ -135,11 +141,15 @@ mod resolve_tests {
               }
             }
         "#;
-        let ts_config: TsConfig = serde_json::from_str(input).unwrap();
-        let alias_result = apply_alias(ts_config, target);
-        assert_eq!(alias_result, PathBuf::from("./app-src/"));
-        // let with_index = resolve(subject_file, "alias_result")?;
-        // dbg!(with_index);
+
+        let cwd = current_dir()?.join("fixtures/ts");
+        let subject_file = cwd.join("src").join("index.ts");
+        let target = PathBuf::from("app-src");
+        let ts_config: UserTsConfig = serde_json::from_str(input).unwrap();
+        let resolved = resolve_target(&cwd, &subject_file, &target, &ts_config)?;
+
+        let expected = current_dir()?.join("fixtures/ts/app-src/index.tsx");
+        assert_eq!(resolved, expected);
         Ok(())
     }
 }

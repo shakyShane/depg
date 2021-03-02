@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, serde::Deserialize)]
-pub struct TsConfig {
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct UserTsConfig {
     #[serde(rename = "compilerOptions")]
     pub compiler_options: Option<CompilerOptions>,
 }
@@ -30,7 +30,7 @@ mod tests {
               }
             }
         "#;
-        let ts_config: TsConfig = serde_json::from_str(input).unwrap();
+        let ts_config: UserTsConfig = serde_json::from_str(input).unwrap();
         dbg!(ts_config.compiler_options.unwrap().paths.unwrap());
     }
 }

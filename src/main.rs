@@ -1,6 +1,8 @@
 mod resolve;
 mod ts_config;
 
+use crate::resolve::resolve_target;
+use crate::ts_config::UserTsConfig;
 use std::env::current_dir;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,8 +13,6 @@ use swc_common::{
     SourceMap,
 };
 use swc_ecma_ast::{ImportSpecifier, ModuleDecl, Program};
-
-use std::collections::{BTreeMap, BTreeSet};
 use swc_ecma_parser::TsConfig;
 
 /// A basic example
@@ -45,12 +45,12 @@ fn main() {
 fn from_opt(opt: Opt) {
     if let Some(cwd) = &opt.cwd {
         for argument in &opt.files {
-            parse(cwd, argument)
+            parse(cwd, argument, UserTsConfig::default())
         }
     }
 }
 
-fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
+fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>, ts_config: UserTsConfig) {
     let cwd = cwd.into();
     let subject_file = cwd.join(pb.into());
     log::debug!("subject_file = {}", subject_file.display());
@@ -76,17 +76,24 @@ fn parse(cwd: impl Into<PathBuf>, pb: impl Into<PathBuf>) {
             false,
         )
         .expect("failed to process file");
-    run(&cwd, &subject_file, p);
+    run(&cwd, &subject_file, p, &ts_config);
 }
 
-fn run(_cwd: &PathBuf, subject_file: &PathBuf, program: swc_ecma_ast::Program) {
+fn run(
+    _cwd: &PathBuf,
+    subject_file: &PathBuf,
+    program: swc_ecma_ast::Program,
+    ts_config: &UserTsConfig,
+) {
     match program {
         Program::Module(m) => {
             m.body.iter().for_each(|item| match item {
                 swc_ecma_ast::ModuleItem::ModuleDecl(m) => {
                     match m {
                         ModuleDecl::Import(imp) => {
-                            let resolved = resolve::resolve(subject_file, &imp.src.value);
+                            let target_import = PathBuf::from(imp.src.value.to_string());
+                            let resolved =
+                                resolve_target(_cwd, subject_file, &target_import, ts_config);
                             if let Err(e) = resolved {
                                 eprintln!(
                                     "ERROR: could not resolve {} from {}",
@@ -95,7 +102,7 @@ fn run(_cwd: &PathBuf, subject_file: &PathBuf, program: swc_ecma_ast::Program) {
                                 );
                                 return eprintln!("    OS error: {}", e);
                             }
-                            log::debug!("++ {:?}", resolved.unwrap());
+                            log::debug!("+resolved+ {:?}", resolved.unwrap());
                             for s in &imp.specifiers {
                                 match s {
                                     ImportSpecifier::Named(_n) => {
@@ -137,28 +144,34 @@ impl Entry {
     }
 }
 
-#[test]
-fn test_btree() {
-    let mut t: BTreeMap<Entry, BTreeSet<Entry>> = BTreeMap::new();
-    let entry_1 = Entry::new("1:src/index.tsx");
-    let entry_2 = Entry::new("2:app-src/index.tsx");
-    let entry_3 = Entry::new("3:components/button.tsx");
-    let entry_4 = Entry::new("4:utils/banner.tsx");
+#[cfg(test)]
+mod test {
+    use crate::Entry;
+    use std::collections::{BTreeMap, BTreeSet};
 
-    // first
-    let mut set1 = BTreeSet::new();
-    set1.insert(entry_2.clone());
+    #[test]
+    fn test_btree() {
+        let mut t: BTreeMap<Entry, BTreeSet<Entry>> = BTreeMap::new();
+        let entry_1 = Entry::new("1:src/index.tsx");
+        let entry_2 = Entry::new("2:app-src/index.tsx");
+        let entry_3 = Entry::new("3:components/button.tsx");
+        let entry_4 = Entry::new("4:utils/banner.tsx");
 
-    // second
-    let mut set2 = BTreeSet::new();
-    set2.insert(entry_3.clone());
-    set2.insert(entry_4.clone());
+        // first
+        let mut set1 = BTreeSet::new();
+        set1.insert(entry_2.clone());
 
-    t.insert(entry_1.clone(), set1);
-    t.insert(entry_2.clone(), set2);
+        // second
+        let mut set2 = BTreeSet::new();
+        set2.insert(entry_3.clone());
+        set2.insert(entry_4.clone());
 
-    let next = t.entry(entry_1).or_insert(BTreeSet::new());
-    next.insert(entry_3.clone());
+        t.insert(entry_1.clone(), set1);
+        t.insert(entry_2.clone(), set2);
 
-    dbg!(t);
+        let next = t.entry(entry_1).or_insert(BTreeSet::new());
+        next.insert(entry_3.clone());
+
+        dbg!(t);
+    }
 }
