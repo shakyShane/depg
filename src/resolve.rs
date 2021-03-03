@@ -15,15 +15,14 @@ pub fn resolve(
         subject_file
     };
     log::trace!(
-        "subject_dir={}, target={}",
+        "subject_dir=`{}`, target=`{}`",
         subject_dir.display(),
         target_import.display()
     );
     let joined = subject_dir.join(target_import);
-    log::trace!("joined={}", joined.display());
+    log::trace!("joined=`{}`", joined.display());
     let joined_real = realpath(&joined);
-    dbg!(&joined_real);
-    log::trace!("joined_real={}", joined_real.display());
+    log::trace!("joined_real=`{}`", joined_real.display());
     let resolved = joined_real.canonicalize();
     match resolved {
         Ok(pb) => expand_path_with_index_or_extension(&pb).ok_or(Error::from(ErrorKind::NotFound)),
@@ -232,5 +231,16 @@ mod tests {
         let input = "app-src/index.tsx";
         let p = realpath(&PathBuf::from(input));
         assert_eq!(p, PathBuf::from(input))
+    }
+
+    #[test]
+    fn test_resolve_relative() -> Result<(), std::io::Error> {
+        let cwd = current_dir()?.join("fixtures/ts");
+        let subject = cwd.join("src/index.ts");
+        let target = "../app-src/utils";
+        let resolved = resolve(&subject, target)?;
+        assert!(resolved.exists());
+        assert_eq!(cwd.join("app-src/utils.ts"), resolved);
+        Ok(())
     }
 }

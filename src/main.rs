@@ -45,7 +45,7 @@ fn main() {
 fn from_opt(opt: Opt) {
     if let Some(cwd) = &opt.cwd {
         for argument in &opt.files {
-            parse(cwd, argument, UserTsConfig::default())
+            parse(cwd, argument, UserTsConfig::from_file(cwd))
         }
     }
 }
